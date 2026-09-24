@@ -123,14 +123,14 @@
     <div class="status" id="statusText">Status: Ruka hua hai</div>
   </div>
 
-  <!-- Hidden canvas frame capture karne ke liye -->
+  <!-- Hidden canvas frame capture ke liye -->
   <canvas id="canvas" style="display: none;"></canvas>
 
   <script>
     let GEMINI_API_KEY = localStorage.getItem("GEMINI_API_KEY");
 
     function askApiKey() {
-      const key = prompt("Apni Gemini API Key yahan paste karein:", GEMINI_API_KEY || "");
+      const key = prompt("Apni Gemini API Key yahan paste karein (Yeh aapke browser me save rahegi):", GEMINI_API_KEY || "");
       if (key && key.trim() !== "") {
         GEMINI_API_KEY = key.trim();
         localStorage.setItem("GEMINI_API_KEY", GEMINI_API_KEY);
@@ -153,6 +153,7 @@
     let stream = null;
     let scanInterval = null;
     let isProcessing = false;
+    let workingModel = null; // Jo model kaam karega use yaad rakhega
 
     keyBtn.addEventListener('click', () => {
       askApiKey();
@@ -172,7 +173,7 @@
 
         startBtn.disabled = true;
         stopBtn.disabled = false;
-        statusText.innerText = "Status: Camera on hai, object scan ho raha hai...";
+        statusText.innerText = "Status: Camera on hai, object scan shuru...";
 
         scanInterval = setInterval(captureAndAnalyze, 4000);
       } catch (err) {
@@ -203,14 +204,16 @@
 
         const base64Data = canvas.toDataURL('image/jpeg', 0.6).split(',')[1];
 
-        // Standard v1 endpoint (v1beta model not found error se bachne ke liye)
-        let url = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
-        
+        // Agar pehle se model mil chuka hai to direct wahi chalayega, nahi to list check karega
+        const modelsToTry = workingModel 
+          ? [workingModel] 
+          : ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-8b"];
+
         const payload = {
           contents: [{
             parts: [
               {
-                text: "Camera ke samne jo mukhya vastu (object) dikh rahi hai uska naam aur chhota vivaran Hindi me sirf 1 ya 2 line me likho."
+                text: "Camera ke samne jo mukhya vastu hai uska naam aur chhota vivaran Hindi me 1 line me likho."
               },
               {
                 inlineData: {
@@ -222,23 +225,23 @@
           }]
         };
 
-        let response = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
-        });
+        let response = null;
+        let data = null;
 
-        // Agar v1 par na mile to latest v1beta alias par fallback
-        if (!response.ok && response.status === 404) {
-          const fallbackUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${GEMINI_API_KEY}`;
-          response = await fetch(fallbackUrl, {
+        for (const model of modelsToTry) {
+          const testUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
+          response = await fetch(testUrl, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload)
           });
-        }
 
-        const data = await response.json();
+          data = await response.json();
+          if (response.ok && !data.error) {
+            workingModel = model; // Sahi model lock ho gaya
+            break;
+          }
+        }
 
         if (data.error) {
           console.error("Gemini Error:", data.error);
@@ -252,8 +255,8 @@
           predictionText.innerText = result.trim();
           statusText.innerText = "Status: Result update ho gaya (Live)";
         } else {
-          predictionText.innerText = "Kuch saaf pehchan nahi paya, kripya vastu ko camera ke paas layein.";
-          statusText.innerText = "Status: Agla scan intezar me...";
+          predictionText.innerText = "Vastu ko camera ke paas ya roshni me layein.";
+          statusText.innerText = "Status: Phir se scan ho raha hai...";
         }
 
       } catch (error) {
