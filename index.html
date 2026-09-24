@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AI Real-Time Object Identifier</title>
+  <title>Camera AI Object Identifier</title>
   <style>
     * {
       box-sizing: border-box;
@@ -37,7 +37,6 @@
       width: 100%;
       height: auto;
       display: block;
-      transform: scaleX(1);
     }
     .btn-group {
       margin: 15px 0;
@@ -124,15 +123,14 @@
     <div class="status" id="statusText">Status: Ruka hua hai</div>
   </div>
 
-  <!-- Frame capture ke liye hidden canvas -->
+  <!-- Hidden canvas frame capture karne ke liye -->
   <canvas id="canvas" style="display: none;"></canvas>
 
   <script>
-    // LocalStorage se API key check karna
     let GEMINI_API_KEY = localStorage.getItem("GEMINI_API_KEY");
 
     function askApiKey() {
-      const key = prompt("Apni Gemini API Key yahan paste karein (Yeh sirf aapke device me save hogi):", GEMINI_API_KEY || "");
+      const key = prompt("Apni Gemini API Key yahan paste karein:", GEMINI_API_KEY || "");
       if (key && key.trim() !== "") {
         GEMINI_API_KEY = key.trim();
         localStorage.setItem("GEMINI_API_KEY", GEMINI_API_KEY);
@@ -140,7 +138,6 @@
       }
     }
 
-    // Pehli baar khulne par key mangega agar nahi hai
     if (!GEMINI_API_KEY) {
       askApiKey();
     }
@@ -157,12 +154,10 @@
     let scanInterval = null;
     let isProcessing = false;
 
-    // API Key badalne ka button
     keyBtn.addEventListener('click', () => {
       askApiKey();
     });
 
-    // Camera Start
     startBtn.addEventListener('click', async () => {
       if (!GEMINI_API_KEY) {
         askApiKey();
@@ -179,14 +174,12 @@
         stopBtn.disabled = false;
         statusText.innerText = "Status: Camera on hai, object scan ho raha hai...";
 
-        // Har 4 second me ek frame analyze karega
         scanInterval = setInterval(captureAndAnalyze, 4000);
       } catch (err) {
         alert("Camera error: " + err.message);
       }
     });
 
-    // Camera Stop
     stopBtn.addEventListener('click', () => {
       if (stream) {
         stream.getTracks().forEach(track => track.stop());
@@ -197,7 +190,6 @@
       statusText.innerText = "Status: Camera band hai";
     });
 
-    // Frame Capture aur Gemini API Call
     async function captureAndAnalyze() {
       if (isProcessing || !stream) return;
       isProcessing = true;
@@ -209,12 +201,11 @@
         const ctx = canvas.getContext('2d');
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-        // Frame ko Base64 JPEG me convert karna
         const base64Data = canvas.toDataURL('image/jpeg', 0.6).split(',')[1];
 
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+        // Standard v1 endpoint (v1beta model not found error se bachne ke liye)
+        let url = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
         
-        // Sahi JSON structure (inlineData & mimeType camelCase me)
         const payload = {
           contents: [{
             parts: [
@@ -231,15 +222,24 @@
           }]
         };
 
-        const response = await fetch(url, {
+        let response = await fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload)
         });
 
+        // Agar v1 par na mile to latest v1beta alias par fallback
+        if (!response.ok && response.status === 404) {
+          const fallbackUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${GEMINI_API_KEY}`;
+          response = await fetch(fallbackUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
+        }
+
         const data = await response.json();
 
-        // Agar Google API se koi error aaye to label me dikhegi
         if (data.error) {
           console.error("Gemini Error:", data.error);
           predictionText.innerText = "API Error: " + data.error.message;
@@ -267,4 +267,3 @@
   </script>
 </body>
 </html>
-
