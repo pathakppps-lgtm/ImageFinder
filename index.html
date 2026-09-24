@@ -120,26 +120,68 @@
   <div class="result-box">
     <div class="result-title">Camera Ke Samne:</div>
     <p id="predictionText">Camera chalu karein, result yahan dikhega...</p>
-    <div class="status" id="statusText">Status: Ruka hua hai</div>
+    <div class="status" id="statusText">Status: Checking setup...</div>
   </div>
 
-  <!-- Hidden canvas frame capture ke liye -->
   <canvas id="canvas" style="display: none;"></canvas>
 
   <script>
     let GEMINI_API_KEY = localStorage.getItem("GEMINI_API_KEY");
+    let activeModelName = null; // Auto-detected model
 
     function askApiKey() {
-      const key = prompt("Apni Gemini API Key yahan paste karein (Yeh aapke browser me save rahegi):", GEMINI_API_KEY || "");
+      const key = prompt("Apni Gemini API Key yahan paste karein:", GEMINI_API_KEY || "");
       if (key && key.trim() !== "") {
         GEMINI_API_KEY = key.trim();
         localStorage.setItem("GEMINI_API_KEY", GEMINI_API_KEY);
-        alert("API Key save ho gayi!");
+        activeModelName = null; // Reset so it detects again
+        detectSupportedModel();
+      }
+    }
+
+    // Google se direct active model ka naam mangna
+    async function detectSupportedModel() {
+      if (!GEMINI_API_KEY) return;
+      statusText.innerText = "Status: Google se compatible model dhundh raha hai...";
+
+      try {
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${GEMINI_API_KEY}`);
+        const data = await res.json();
+
+        if (data.error) {
+          predictionText.innerText = "API Key Error: " + data.error.message;
+          statusText.innerText = "Status: Invalid API Key";
+          return;
+        }
+
+        if (data.models && data.models.length > 0) {
+          // Aisa model khojo jo generateContent support karta ho aur flash/vision model ho
+          const compatible = data.models.filter(m => 
+            m.supportedGenerationMethods && m.supportedGenerationMethods.includes("generateContent")
+          );
+
+          // Preference order: flash models first
+          const preferred = compatible.find(m => m.name.includes("flash")) || compatible[0];
+
+          if (preferred) {
+            // Model ka pura naam le lo (jaise models/gemini-2.0-flash ya models/gemini-1.5-flash)
+            activeModelName = preferred.name;
+            statusText.innerText = "Status: Ready! Model mil gaya (" + activeModelName.replace("models/", "") + ")";
+            console.log("Using detected model:", activeModelName);
+            return;
+          }
+        }
+        statusText.innerText = "Status: Koi compatible model nahi mila.";
+      } catch (err) {
+        console.error(err);
+        statusText.innerText = "Status: Connection fail ho gaya.";
       }
     }
 
     if (!GEMINI_API_KEY) {
       askApiKey();
+    } else {
+      detectSupportedModel();
     }
 
     const video = document.getElementById('webcam');
@@ -153,7 +195,6 @@
     let stream = null;
     let scanInterval = null;
     let isProcessing = false;
-    let workingModel = null; // Jo model kaam karega use yaad rakhega
 
     keyBtn.addEventListener('click', () => {
       askApiKey();
@@ -165,6 +206,10 @@
         if (!GEMINI_API_KEY) return;
       }
 
+      if (!activeModelName) {
+        await detectSupportedModel();
+      }
+
       try {
         stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: "environment" }
@@ -173,7 +218,7 @@
 
         startBtn.disabled = true;
         stopBtn.disabled = false;
-        statusText.innerText = "Status: Camera on hai, object scan shuru...";
+        statusText.innerText = "Status: Camera on hai, scanning chalu...";
 
         scanInterval = setInterval(captureAndAnalyze, 4000);
       } catch (err) {
@@ -192,7 +237,7 @@
     });
 
     async function captureAndAnalyze() {
-      if (isProcessing || !stream) return;
+      if (isProcessing || !stream || !activeModelName) return;
       isProcessing = true;
       statusText.innerText = "Status: Gemini pehchan raha hai...";
 
@@ -204,16 +249,14 @@
 
         const base64Data = canvas.toDataURL('image/jpeg', 0.6).split(',')[1];
 
-        // Agar pehle se model mil chuka hai to direct wahi chalayega, nahi to list check karega
-        const modelsToTry = workingModel 
-          ? [workingModel] 
-          : ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-8b"];
-
+        // Direct verified model URL use karein
+        const url = `https://generativelanguage.googleapis.com/v1beta/${activeModelName}:generateContent?key=${GEMINI_API_KEY}`;
+        
         const payload = {
           contents: [{
             parts: [
               {
-                text: "Camera ke samne jo mukhya vastu hai uska naam aur chhota vivaran Hindi me 1 line me likho."
+                text: "Camera ke samne jo mukhya vastu hai uska naam aur chhota vivaran Hindi me sirf 1 line me likho."
               },
               {
                 inlineData: {
@@ -225,23 +268,13 @@
           }]
         };
 
-        let response = null;
-        let data = null;
+        const response = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
 
-        for (const model of modelsToTry) {
-          const testUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
-          response = await fetch(testUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload)
-          });
-
-          data = await response.json();
-          if (response.ok && !data.error) {
-            workingModel = model; // Sahi model lock ho gaya
-            break;
-          }
-        }
+        const data = await response.json();
 
         if (data.error) {
           console.error("Gemini Error:", data.error);
@@ -253,15 +286,15 @@
         if (data.candidates && data.candidates[0].content && data.candidates[0].content.parts.length > 0) {
           const result = data.candidates[0].content.parts[0].text;
           predictionText.innerText = result.trim();
-          statusText.innerText = "Status: Result update ho gaya (Live)";
+          statusText.innerText = "Status: Pehchan liya! (Live)";
         } else {
           predictionText.innerText = "Vastu ko camera ke paas ya roshni me layein.";
-          statusText.innerText = "Status: Phir se scan ho raha hai...";
+          statusText.innerText = "Status: Agla scan ho raha hai...";
         }
 
       } catch (error) {
         console.error("Network/Script Error:", error);
-        predictionText.innerText = "Network ya connection problem aayi.";
+        predictionText.innerText = "Network problem aayi.";
         statusText.innerText = "Status: Request fail ho gayi";
       } finally {
         isProcessing = false;
