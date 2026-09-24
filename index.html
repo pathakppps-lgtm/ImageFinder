@@ -3,44 +3,57 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Real-time Object Detection with Gemini</title>
+  <title>AI Real-Time Object Identifier</title>
   <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
     body {
-      font-family: Arial, sans-serif;
-      background: #f4f6f9;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: #f0f2f5;
       display: flex;
       flex-direction: column;
       align-items: center;
-      padding: 20px;
+      padding: 20px 15px;
+      min-height: 100vh;
     }
     h2 {
-      color: #333;
+      color: #1a73e8;
+      margin-bottom: 15px;
+      text-align: center;
     }
-    .video-container {
+    .video-card {
       position: relative;
       width: 100%;
-      max-width: 500px;
+      max-width: 480px;
       border-radius: 12px;
       overflow: hidden;
       background: #000;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      box-shadow: 0 4px 15px rgba(0,0,0,0.2);
     }
     video {
       width: 100%;
+      height: auto;
       display: block;
+      transform: scaleX(1);
     }
-    .btn-container {
+    .btn-group {
       margin: 15px 0;
       display: flex;
-      gap: 10px;
+      gap: 12px;
+      flex-wrap: wrap;
+      justify-content: center;
     }
     button {
       padding: 10px 20px;
-      font-size: 16px;
+      font-size: 15px;
       border: none;
       border-radius: 6px;
       cursor: pointer;
-      font-weight: bold;
+      font-weight: 600;
+      transition: 0.2s ease;
     }
     #startBtn {
       background-color: #28a745;
@@ -50,146 +63,208 @@
       background-color: #dc3545;
       color: white;
     }
+    #keyBtn {
+      background-color: #6c757d;
+      color: white;
+      font-size: 13px;
+    }
     button:disabled {
-      background-color: #ccc;
+      background-color: #b0bec5;
       cursor: not-allowed;
     }
-    .label-box {
+    .result-box {
       width: 100%;
-      max-width: 500px;
-      padding: 15px;
+      max-width: 480px;
+      padding: 16px;
       background: white;
-      border-radius: 8px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-      border-left: 5px solid #007bff;
+      border-radius: 10px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+      border-left: 6px solid #1a73e8;
+    }
+    .result-title {
+      font-size: 14px;
+      color: #5f6368;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      font-weight: bold;
+    }
+    #predictionText {
+      font-size: 18px;
+      color: #202124;
+      line-height: 1.5;
+      font-weight: 500;
+      min-height: 48px;
     }
     .status {
       font-size: 13px;
-      color: #666;
-      margin-top: 5px;
+      color: #70757a;
+      margin-top: 10px;
+      border-top: 1px solid #eee;
+      padding-top: 8px;
     }
   </style>
 </head>
 <body>
 
-  <h2>Gemini Object Identifier</h2>
+  <h2>Camera AI Object Identifier</h2>
 
-  <div class="video-container">
+  <div class="video-card">
     <video id="webcam" autoplay playsinline muted></video>
   </div>
 
-  <div class="btn-container">
+  <div class="btn-group">
     <button id="startBtn">Camera Start</button>
     <button id="stopBtn" disabled>Camera Stop</button>
+    <button id="keyBtn">API Key Badlein</button>
   </div>
 
-  <div class="label-box">
-    <strong>Camera ke samne kya hai:</strong>
-    <p id="predictionText" style="font-size: 18px; color: #222; margin: 8px 0;">
-      (Camera on hone par yahan naam aayega)
-    </p>
-    <div class="status" id="statusText">Status: Idle</div>
+  <div class="result-box">
+    <div class="result-title">Camera Ke Samne:</div>
+    <p id="predictionText">Camera chalu karein, result yahan dikhega...</p>
+    <div class="status" id="statusText">Status: Ruka hua hai</div>
   </div>
 
-  <!-- Hidden canvas frame capture karne ke liye -->
+  <!-- Frame capture ke liye hidden canvas -->
   <canvas id="canvas" style="display: none;"></canvas>
 
-  
-<script>
-  // 1. Check karein ki kya pehle se key saved hai
-  let GEMINI_API_KEY = localStorage.getItem("GEMINI_KEY");
+  <script>
+    // LocalStorage se API key check karna
+    let GEMINI_API_KEY = localStorage.getItem("GEMINI_API_KEY");
 
-  // Agar nahi hai, to screen par prompt khulega
-  if (!GEMINI_API_KEY) {
-    GEMINI_API_KEY = prompt("Kripya apni Gemini API Key dalein (Yeh sirf aapke browser me save rahegi):");
-    if (GEMINI_API_KEY) {
-      localStorage.setItem("GEMINI_KEY", GEMINI_API_KEY.trim());
-    }
-  }
-
-  const video = document.getElementById('webcam');
-  const startBtn = document.getElementById('startBtn');
-  const stopBtn = document.getElementById('stopBtn');
-  const canvas = document.getElementById('canvas');
-  const predictionText = document.getElementById('predictionText');
-  const statusText = document.getElementById('statusText');
-
-  let stream = null;
-  let scanInterval = null;
-  let isProcessing = false;
-
-  startBtn.addEventListener('click', async () => {
-    if (!GEMINI_API_KEY) {
-      alert("API Key nahi mili! Page refresh karke key dalein.");
-      return;
-    }
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" }
-      });
-      video.srcObject = stream;
-      startBtn.disabled = true;
-      stopBtn.disabled = false;
-      statusText.innerText = "Status: Camera chalu hai. Scan shuru...";
-
-      scanInterval = setInterval(captureAndAnalyze, 4000);
-    } catch (err) {
-      alert("Camera access error: " + err.message);
-    }
-  });
-
-  stopBtn.addEventListener('click', () => {
-    if (stream) {
-      stream.getTracks().forEach(track => track.stop());
-    }
-    clearInterval(scanInterval);
-    startBtn.disabled = false;
-    stopBtn.disabled = true;
-    statusText.innerText = "Status: Band hai";
-  });
-
-  async function captureAndAnalyze() {
-    if (isProcessing || !stream) return;
-    isProcessing = true;
-    statusText.innerText = "Status: Pehchan raha hai...";
-
-    try {
-      canvas.width = video.videoWidth || 640;
-      canvas.height = video.videoHeight || 480;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-      const base64Data = canvas.toDataURL('image/jpeg', 0.7).split(',')[1];
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
-      
-      const payload = {
-        contents: [{
-          parts: [
-            { text: "Camera ke samne jo main object hai uska naam aur chhota description Hindi me do." },
-            { inline_data: { mime_type: "image/jpeg", data: base64Data } }
-          ]
-        }]
-      };
-
-      const response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-
-      const data = await response.json();
-      if (data.candidates && data.candidates[0].content.parts.length > 0) {
-        predictionText.innerText = data.candidates[0].content.parts[0].text.trim();
+    function askApiKey() {
+      const key = prompt("Apni Gemini API Key yahan paste karein (Yeh sirf aapke device me save hogi):", GEMINI_API_KEY || "");
+      if (key && key.trim() !== "") {
+        GEMINI_API_KEY = key.trim();
+        localStorage.setItem("GEMINI_API_KEY", GEMINI_API_KEY);
+        alert("API Key save ho gayi!");
       }
-      statusText.innerText = "Status: Update ho gaya";
-    } catch (error) {
-      console.error(error);
-      statusText.innerText = "Status: Error aayi";
-    } finally {
-      isProcessing = false;
     }
-  }
-</script>
 
+    // Pehli baar khulne par key mangega agar nahi hai
+    if (!GEMINI_API_KEY) {
+      askApiKey();
+    }
+
+    const video = document.getElementById('webcam');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const keyBtn = document.getElementById('keyBtn');
+    const canvas = document.getElementById('canvas');
+    const predictionText = document.getElementById('predictionText');
+    const statusText = document.getElementById('statusText');
+
+    let stream = null;
+    let scanInterval = null;
+    let isProcessing = false;
+
+    // API Key badalne ka button
+    keyBtn.addEventListener('click', () => {
+      askApiKey();
+    });
+
+    // Camera Start
+    startBtn.addEventListener('click', async () => {
+      if (!GEMINI_API_KEY) {
+        askApiKey();
+        if (!GEMINI_API_KEY) return;
+      }
+
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment" }
+        });
+        video.srcObject = stream;
+
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+        statusText.innerText = "Status: Camera on hai, object scan ho raha hai...";
+
+        // Har 4 second me ek frame analyze karega
+        scanInterval = setInterval(captureAndAnalyze, 4000);
+      } catch (err) {
+        alert("Camera error: " + err.message);
+      }
+    });
+
+    // Camera Stop
+    stopBtn.addEventListener('click', () => {
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+      }
+      clearInterval(scanInterval);
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      statusText.innerText = "Status: Camera band hai";
+    });
+
+    // Frame Capture aur Gemini API Call
+    async function captureAndAnalyze() {
+      if (isProcessing || !stream) return;
+      isProcessing = true;
+      statusText.innerText = "Status: Gemini pehchan raha hai...";
+
+      try {
+        canvas.width = video.videoWidth || 640;
+        canvas.height = video.videoHeight || 480;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        // Frame ko Base64 JPEG me convert karna
+        const base64Data = canvas.toDataURL('image/jpeg', 0.6).split(',')[1];
+
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+        
+        // Sahi JSON structure (inlineData & mimeType camelCase me)
+        const payload = {
+          contents: [{
+            parts: [
+              {
+                text: "Camera ke samne jo mukhya vastu (object) dikh rahi hai uska naam aur chhota vivaran Hindi me sirf 1 ya 2 line me likho."
+              },
+              {
+                inlineData: {
+                  mimeType: "image/jpeg",
+                  data: base64Data
+                }
+              }
+            ]
+          }]
+        };
+
+        const response = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await response.json();
+
+        // Agar Google API se koi error aaye to label me dikhegi
+        if (data.error) {
+          console.error("Gemini Error:", data.error);
+          predictionText.innerText = "API Error: " + data.error.message;
+          statusText.innerText = "Status: Error aayi";
+          return;
+        }
+
+        if (data.candidates && data.candidates[0].content && data.candidates[0].content.parts.length > 0) {
+          const result = data.candidates[0].content.parts[0].text;
+          predictionText.innerText = result.trim();
+          statusText.innerText = "Status: Result update ho gaya (Live)";
+        } else {
+          predictionText.innerText = "Kuch saaf pehchan nahi paya, kripya vastu ko camera ke paas layein.";
+          statusText.innerText = "Status: Agla scan intezar me...";
+        }
+
+      } catch (error) {
+        console.error("Network/Script Error:", error);
+        predictionText.innerText = "Network ya connection problem aayi.";
+        statusText.innerText = "Status: Request fail ho gayi";
+      } finally {
+        isProcessing = false;
+      }
+    }
+  </script>
 </body>
 </html>
+
